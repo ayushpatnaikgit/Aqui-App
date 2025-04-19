@@ -1,6 +1,62 @@
-# AQUI
+# Air Quality Monitoring App
 
-A React Native mobile application for air quality monitoring using SDS011/SDS021 PM sensors. AQUI connects to particulate matter sensors via USB to provide real-time air quality measurements.
+An application for reading air quality data from SDS011/SDS021 particulate matter sensors via USB serial connection.
+
+## Recent Code Improvements
+
+We've significantly improved the codebase through several key changes:
+
+### 1. Simplified and Organized Sensor Utilities (`sensorUtils.ts`)
+
+- **Organized by Functionality**: Grouped related functions into logical namespaces:
+  - `ByteUtils`: Hex/decimal conversion utilities
+  - `SensorPacket`: Packet handling and parsing functions
+  - `SensorCommands`: Command generation
+  - `AirQualityIndex`: Air quality categorization
+
+- **Removed Debug Code**: Eliminated excessive console.log statements to improve readability and performance
+
+- **Better Structure**: Improved organization makes the code more maintainable and easier to understand
+
+### 2. Enhanced USB Serial Hook (`useUsbSerial.ts`)
+
+- **Consolidated State Management**: 
+  - Combined related state variables into structured objects
+  - Better organization of connection state, config options, and timers
+
+- **Improved Type Safety**:
+  - Added proper TypeScript interfaces for all data structures
+  - Fixed issues with dynamic function references
+
+- **Reliable Connection Handling**:
+  - Better handling of device attachment/detachment
+  - More robust error recovery mechanisms
+
+### 3. Simplified Sensor Data Processing (`useSensorData.ts` and `SensorData.tsx`)
+
+- **Updated to Use New Utilities**:
+  - Leveraging the restructured utility functions
+  - Type-safe access to style properties
+
+- **Reduced Code Duplication**:
+  - Eliminated redundant conversion code
+  - Centralized sensor data processing logic
+
+### Benefits of These Changes
+
+- **More maintainable code**: Better organization makes the code easier to understand and modify
+- **Reduced duplication**: Common functions are defined once and reused
+- **Improved reliability**: More robust error handling and device connection management
+- **Better type safety**: Proper TypeScript typing throughout the codebase
+
+## Usage
+
+Connect your SDS011/SDS021 sensor to your Android device via USB (requires OTG support). The app will automatically detect and connect to the sensor and begin displaying air quality measurements.
+
+- **PM2.5**: Fine particulate matter (2.5 micrometers or smaller)
+- **PM10**: Coarse particulate matter (10 micrometers or smaller)
+
+The readings are color-coded according to standard air quality categories from Good (green) to Hazardous (dark pink).
 
 ## Features
 

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, Animated } from 'react-native';
-import { getPM25Category, getPM10Category } from '../utils/sensorUtils';
+import { AirQualityIndex } from '../utils/sensorUtils';
 
 interface SensorDataProps {
   pm25: number | null;
@@ -12,6 +12,15 @@ interface SensorDataProps {
   connected: boolean;
   packetType?: 'standard' | 'modified' | null;
 }
+
+// Define the style category types
+type AqiStyleCategory = 
+  | 'goodReading'
+  | 'moderateReading'
+  | 'unhealthySensitiveReading'
+  | 'unhealthyReading'
+  | 'veryUnhealthyReading'
+  | 'hazardousReading';
 
 const SensorData: React.FC<SensorDataProps> = ({ 
   pm25, 
@@ -29,6 +38,15 @@ const SensorData: React.FC<SensorDataProps> = ({
   
   // Animation for status indicator
   const [pulseAnim] = useState(new Animated.Value(1));
+  
+  // Get the style category for PM values
+  const getPm25StyleCategory = (value: number): AqiStyleCategory => {
+    return AirQualityIndex.getCategoryStyle(value, true) as AqiStyleCategory;
+  };
+  
+  const getPm10StyleCategory = (value: number): AqiStyleCategory => {
+    return AirQualityIndex.getCategoryStyle(value, false) as AqiStyleCategory;
+  };
   
   // Start pulsing animation for connected state
   useEffect(() => {
@@ -102,18 +120,13 @@ const SensorData: React.FC<SensorDataProps> = ({
                 <Text style={styles.sensorLabel}>PM2.5</Text>
                 <Text style={[
                   styles.sensorReading, 
-                  displayPm25 <= 12 ? styles.goodReading : 
-                  displayPm25 <= 35 ? styles.moderateReading : 
-                  displayPm25 <= 55 ? styles.unhealthySensitiveReading :
-                  displayPm25 <= 150 ? styles.unhealthyReading :
-                  displayPm25 <= 250 ? styles.veryUnhealthyReading : 
-                  styles.hazardousReading
+                  styles[displayPm25 ? getPm25StyleCategory(displayPm25) : 'goodReading']
                 ]}>
                   {displayPm25.toFixed(1)}
                 </Text>
                 <Text style={styles.sensorUnit}>µg/m³</Text>
                 <Text style={styles.sensorInfo}>
-                  {getPM25Category(displayPm25)}
+                  {AirQualityIndex.getPM25Category(displayPm25)}
                 </Text>
               </View>
               
@@ -121,18 +134,13 @@ const SensorData: React.FC<SensorDataProps> = ({
                 <Text style={styles.sensorLabel}>PM10</Text>
                 <Text style={[
                   styles.sensorReading,
-                  displayPm10 <= 54 ? styles.goodReading : 
-                  displayPm10 <= 154 ? styles.moderateReading : 
-                  displayPm10 <= 254 ? styles.unhealthySensitiveReading :
-                  displayPm10 <= 354 ? styles.unhealthyReading :
-                  displayPm10 <= 424 ? styles.veryUnhealthyReading : 
-                  styles.hazardousReading
+                  styles[displayPm10 ? getPm10StyleCategory(displayPm10) : 'goodReading']
                 ]}>
                   {displayPm10.toFixed(1)}
                 </Text>
                 <Text style={styles.sensorUnit}>µg/m³</Text>
                 <Text style={styles.sensorInfo}>
-                  {getPM10Category(displayPm10)}
+                  {AirQualityIndex.getPM10Category(displayPm10)}
                 </Text>
               </View>
             </View>
@@ -248,34 +256,39 @@ const styles = StyleSheet.create({
   noDataContainer: {
     alignItems: 'center',
     padding: 24,
+    borderWidth: 1,
+    borderColor: '#eee',
+    borderRadius: 8,
+    backgroundColor: '#f9f9f9',
   },
   noDataText: {
-    fontSize: 18,
-    fontWeight: 'bold',
+    fontSize: 14,
     color: '#666',
+    textAlign: 'center',
     marginBottom: 8,
   },
   noDataSubtext: {
-    fontSize: 14,
+    fontSize: 12,
     color: '#999',
+    textAlign: 'center',
   },
   goodReading: {
-    color: '#4CAF50',
+    color: '#4CAF50', // Green
   },
   moderateReading: {
-    color: '#FFA500',
+    color: '#FFEB3B', // Yellow
   },
   unhealthySensitiveReading: {
-    color: '#FF5733',
+    color: '#FF9800', // Orange
   },
   unhealthyReading: {
-    color: '#FF3333',
+    color: '#F44336', // Red
   },
   veryUnhealthyReading: {
-    color: '#FF33FF',
+    color: '#9C27B0', // Purple
   },
   hazardousReading: {
-    color: '#FF3333',
+    color: '#880E4F', // Dark Pink
   },
 });
 

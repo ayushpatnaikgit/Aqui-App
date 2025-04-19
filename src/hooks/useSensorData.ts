@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { extractPMValues, byteArrayToHexString, extractPMValuesFromModifiedFormat, byteArrayToDecString, padHex, convertPairedFormat } from '../utils/sensorUtils';
+import { extractPMValues, byteArrayToHexString, extractPMValuesFromModifiedFormat, byteArrayToDecString, padHex } from '../utils/sensorUtils';
 
 /**
  * Custom hook for handling SDS011/SDS021 sensor data
@@ -72,100 +72,79 @@ export const useSensorData = ({ dataBuffer, onLog, clearBuffer }: UseSensorDataP
   useEffect(() => {
     console.log(`[DEBUG] Processing buffer of length: ${dataBuffer?.length || 0}`);
     
-    if (!dataBuffer || dataBuffer.length < 10) {
-      console.log('[DEBUG] Buffer too short, skipping processing');
+    if (!dataBuffer || dataBuffer.length === 0) {
+      console.log('[DEBUG] Buffer empty, skipping processing');
       return;
     }
     
-    // Get the first 20 bytes for analysis
-    const previewSlice = dataBuffer.slice(0, Math.min(dataBuffer.length, 20));
-    console.log(`[DEBUG] Buffer preview (HEX): ${byteArrayToHexString(previewSlice)}`);
-    console.log(`[DEBUG] Buffer preview (DEC): ${byteArrayToDecString(previewSlice)}`);
-    
-    // Check if previewSlice has expected markers for modified format (0A 0A...0A 0B)
-    const convertedslice = byteArrayToDecString(previewSlice)
-    const cleanedSlice = convertedslice.split(' ').filter(s => s !== '').join('')
-    // Convert the cleaned slice string back to a 10 byte array
-    const cleanedBytes = cleanedSlice.match(/.{1,2}/g) || [];
-
-    console.log(`[DEBUG] Converted slice: ${cleanedBytes}`);
-    // Process the cleaned bytes if we have 10 bytes
-    if (cleanedBytes.length === 10) {
-      console.log('[DEBUG] Processing 10 cleaned bytes:', cleanedBytes.join(' '));
+    // We should now just have a direct 10-byte array from a single packet
+    if (dataBuffer.length === 10) {
+      console.log('[DEBUG] Processing 10-byte packet');
       
-      // Convert hex strings back to numbers
-      const cleanedNumbers = cleanedBytes.map(byte => parseInt(byte, 16));
-      console.log('[DEBUG] Converted to numbers:', cleanedNumbers);
-
-      // Try extracting values from the cleaned bytes
-      try {
-        const pm25Direct = cleanedNumbers[2];
-        const pm10Direct = cleanedNumbers[4];
+      // Check if it's a standard SDS011 packet (starts with 0xAA, ends with 0xAB)
+      if (dataBuffer[0] === 0xAA && dataBuffer[9] === 0xAB) {
+        console.log(`[DEBUG] Standard SDS011 packet found (HEX): ${byteArrayToHexString(dataBuffer)}`);
         
-        // Use the formula matching the Java code: (high_byte*256 + low_byte)/10
-        const pm25 = (cleanedNumbers[3]*256 + cleanedNumbers[2])/10;
-        const pm10 = (cleanedNumbers[5]*256 + cleanedNumbers[4])/10;
-
-        if (pm25 >= 0 && pm25 <= 999 && pm10 >= 0 && pm10 <= 999) {
-          console.log(`[DEBUG] Found valid values using Java formula: PM2.5=${pm25}, PM10=${pm10}`);
-          
-          // Add reading and update averages
-          addReading(pm25, pm10);
-          setPacketType('modified');
-          
-          if (onLog) {
-            onLog(`Parsed values with formula: PM2.5=${pm25.toFixed(1)}, PM10=${pm10.toFixed(1)}`);
-          }
-          
-          // Clear buffer after successful processing
-          if (clearBuffer) {
-            clearBuffer();
-            console.log('[DEBUG] Buffer cleared after successful data extraction');
-          }
-          
-          return;
-        }
-      } catch (err) {
-        console.log('[DEBUG] Error processing cleaned bytes:', err);
-      }
-    }
- 
-    
-    // Fall back to standard search if modified format not found or processing failed
-    console.log('[DEBUG] Searching for standard 10-byte packets');
-    for (let i = 0; i < dataBuffer.length - 10; i++) {
-      if (dataBuffer[i] === 0xAA && dataBuffer[i + 9] === 0xAB) {
-        console.log(`[DEBUG] Potential standard packet found at position ${i}`);
-        const packet = dataBuffer.slice(i, i + 10);
-        console.log(`[DEBUG] Standard packet (HEX): ${byteArrayToHexString(packet)}`);
-        console.log(`[DEBUG] Standard packet (DEC): ${byteArrayToDecString(packet)}`);
-        
-        const values = extractPMValues(packet);
+        const values = extractPMValues(dataBuffer);
         
         if (values) {
-          console.log(`[DEBUG] Valid standard packet confirmed, PM2.5: ${values.pm25}, PM10: ${values.pm10}`);
+          console.log(`[DEBUG] Valid values extracted: PM2.5=${values.pm25}, PM10=${values.pm10}`);
           
           // Add reading and update averages
           addReading(values.pm25, values.pm10);
           setPacketType('standard');
           
           if (onLog) {
-            onLog(`Standard packet found: ${byteArrayToHexString(packet)}`);
-            onLog(`Valid values extracted: PM2.5=${values.pm25.toFixed(1)}, PM10=${values.pm10.toFixed(1)}`);
+            onLog(`Valid SDS011 packet: ${byteArrayToHexString(dataBuffer)}`);
+            onLog(`Values: PM2.5=${values.pm25.toFixed(1)}, PM10=${values.pm10.toFixed(1)}`);
           }
           
           // Clear buffer after successful processing
           if (clearBuffer) {
             clearBuffer();
-            console.log('[DEBUG] Buffer cleared after successful data extraction');
           }
           
-          return; // Exit once we find a valid packet
+          return;
         }
       }
+      
+      // Even if it's not a standard packet (doesn't have AA/AB markers)
+      // Try to extract values from the raw bytes
+      try {
+        // Use the formula matching the Java code: (high_byte*256 + low_byte)/10
+        const pm25 = (dataBuffer[3]*256 + dataBuffer[2])/10;
+        const pm10 = (dataBuffer[5]*256 + dataBuffer[4])/10;
+        
+        // Check if values are reasonable
+        if (pm25 >= 0 && pm25 <= 999 && pm10 >= 0 && pm10 <= 999) {
+          console.log(`[DEBUG] Raw data values: PM2.5=${pm25}, PM10=${pm10}`);
+          
+          // Add reading and update averages
+          addReading(pm25, pm10);
+          setPacketType('modified');
+          
+          if (onLog) {
+            onLog(`Raw data packet: ${byteArrayToHexString(dataBuffer)}`);
+            onLog(`Values: PM2.5=${pm25.toFixed(1)}, PM10=${pm10.toFixed(1)}`);
+          }
+          
+          // Clear buffer after successful processing
+          if (clearBuffer) {
+            clearBuffer();
+          }
+          
+          return;
+        } else {
+          console.log('[DEBUG] Values out of reasonable range:', pm25, pm10);
+        }
+      } catch (err) {
+        console.log('[DEBUG] Error processing bytes:', err);
+      }
+    } else {
+      console.log(`[DEBUG] Unexpected buffer length: ${dataBuffer.length}, expected 10 bytes`);
     }
     
-    console.log('[DEBUG] No valid packets found in buffer');
+    console.log('[DEBUG] No valid data could be extracted');
   }, [dataBuffer, onLog, clearBuffer]);
   
   return { 
