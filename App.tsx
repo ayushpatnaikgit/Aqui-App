@@ -132,25 +132,28 @@ function App(): React.JSX.Element {
     setLog(prevLog => {
       // In dev mode, show all logs, in user mode only show user-friendly ones
       const userMessage = getUserFriendlyMessage(message);
-      
+
       if (!devMode && userMessage === null) {
         return prevLog; // Skip this log in user mode if no user-friendly version
       }
 
       const displayMessage = devMode ? message : (userMessage || message);
       const newLog = [...prevLog, `${new Date().toLocaleTimeString()}: ${displayMessage}`];
-      
+
       // Keep last 50 logs
       return newLog.slice(-50);
     });
   }, [devMode]);
 
   // Initialize USB Serial with logging
-  const { 
+  const {
     devices,
     connected,
     currentDevice,
-    dataBuffer,
+    latestPM25,
+    latestPM10,
+    latestPacketType,
+    latestTimestamp,
     autoConnect,
     autoRefresh,
     refreshDeviceList,
@@ -159,25 +162,20 @@ function App(): React.JSX.Element {
     sendCommand,
     toggleAutoConnect,
     toggleAutoRefresh,
-    clearBuffer,
   } = useUsbSerial(addLog);
 
   // Process sensor data
-  const { pm25, pm10, avgPm25, avgPm10, readingsCount, lastUpdate, packetType } = useSensorData({ 
-    dataBuffer, 
+  const { pm25, pm10, avgPm25, avgPm10, readingsCount, lastUpdate, packetType } = useSensorData({
+    latestPM25,
+    latestPM10,
+    latestPacketType,
+    latestTimestamp,
     onLog: addLog,
-    clearBuffer 
   });
 
   useEffect(() => {
     console.log('[DEBUG] App: USB Connection status changed:', connected);
   }, [connected]);
-
-  useEffect(() => {
-    if (dataBuffer && dataBuffer.length > 0) {
-      console.log(`[DEBUG] App: Data buffer updated, length: ${dataBuffer.length}`);
-    }
-  }, [dataBuffer]);
 
   useEffect(() => {
     if (pm25 !== null && pm10 !== null) {
@@ -196,7 +194,11 @@ function App(): React.JSX.Element {
   };
 
   const toggleShowLogs = () => {
-    setShowLogs(prev => !prev);
+    console.log('[DEBUG] Toggle show logs, current value:', showLogs);
+    setShowLogs(prev => {
+      console.log('[DEBUG] New value will be:', !prev);
+      return !prev;
+    });
   };
 
   return (
@@ -241,7 +243,7 @@ function App(): React.JSX.Element {
 
           <AboutSensor />
 
-          {/* Raw Data Monitor
+          {/* Raw Data Monitor - Note: This component needs updating to work with the new data flow
           {connected && (
             <RawDataMonitor dataBuffer={dataBuffer} connected={connected} />
           )} */}

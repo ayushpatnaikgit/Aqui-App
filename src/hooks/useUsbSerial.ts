@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { PermissionsAndroid, Platform } from 'react-native';
 import { UsbSerialManager, Parity } from 'react-native-usb-serialport-for-android';
-import { SensorCommands, ByteUtils } from '../utils/sensorUtils';
+import { SensorCommands, ByteUtils, SensorPacket } from '../utils/sensorUtils';
 
 /**
  * Interface for device information
@@ -20,7 +20,10 @@ interface ConnectionState {
   currentDevice: number | null;
   serialport: any;
   subscription: any;
-  dataBuffer: number[];
+  latestPM25: number | null;
+  latestPM10: number | null;
+  latestPacketType: 'standard' | 'modified' | null;
+  latestTimestamp: number | null;
 }
 
 /**
@@ -70,7 +73,10 @@ export const useUsbSerial = (onLog?: (message: string) => void) => {
     currentDevice: null,
     serialport: null,
     subscription: null,
-    dataBuffer: [],
+    latestPM25: null,
+    latestPM10: null,
+    latestPacketType: null,
+    latestTimestamp: null,
   });
   
   // Configuration state
@@ -86,7 +92,7 @@ export const useUsbSerial = (onLog?: (message: string) => void) => {
     connectionCheck: null,
     reattachDelay: null,
   });
-  
+
   // Track state that doesn't need to trigger re-renders
   const stateRefs = useRef<StateRefs>({
     lastDataReceived: Date.now(),
@@ -94,6 +100,14 @@ export const useUsbSerial = (onLog?: (message: string) => void) => {
     lastDetachedDeviceId: null,
     deviceAttachmentTime: 0,
   });
+
+  // Throttle state updates to prevent overwhelming React with too many re-renders
+  const lastStateUpdateTime = useRef<number>(0);
+  const THROTTLE_MS = 500; // Update state at most once per 500ms
+
+  // Track previous device count to avoid logging spam
+  const lastDeviceCount = useRef<number>(0);
+  const lastConnectedDeviceId = useRef<number | null>(null);
 
   /**
    * Log a message if a logging function is provided
@@ -181,8 +195,9 @@ export const useUsbSerial = (onLog?: (message: string) => void) => {
           currentDevice: null,
           subscription: null,
         });
-        
-        logMessage('Disconnected from device');
+
+        // Reset connection tracking
+        lastConnectedDeviceId.current = null;
         
         // Refresh device list immediately after disconnection to update UI
         refreshDeviceList();
@@ -206,7 +221,7 @@ export const useUsbSerial = (onLog?: (message: string) => void) => {
    * Handle unexpected device disconnection
    */
   handleDeviceDisconnection = useCallback((isPhysicalDetachment = false) => {
-    logMessage(`Handling ${isPhysicalDetachment ? 'physical' : 'unexpected'} device disconnection`);
+    // Only log user-friendly messages (reduced technical spam)
     
     // Clean up the connection
     try {
@@ -281,11 +296,10 @@ export const useUsbSerial = (onLog?: (message: string) => void) => {
       }
     } catch (error) {
       stateRefs.current.connectionErrorCount++;
-      logMessage(`Connection check failed (${stateRefs.current.connectionErrorCount}): ${error}`);
-      
-      // If we've had multiple consecutive errors, assume device is disconnected
+
+      // Only log and handle disconnection after multiple failures (reduce log spam)
       if (stateRefs.current.connectionErrorCount >= 2) {
-        logMessage("Device appears to be disconnected. Cleaning up connection.");
+        logMessage("Sensor connection lost. Attempting to reconnect...");
         handleDeviceDisconnection();
       }
     }
@@ -298,15 +312,20 @@ export const useUsbSerial = (onLog?: (message: string) => void) => {
     try {
       const deviceList = await UsbSerialManager.list();
       setDevices(deviceList || []);
-      logMessage(`Found ${deviceList.length} device(s)`);
-      
+
+      // Only log when device count changes (reduce spam from auto-refresh)
+      if (deviceList.length !== lastDeviceCount.current) {
+        logMessage(`Found ${deviceList.length} device(s)`);
+        lastDeviceCount.current = deviceList.length;
+      }
+
       // If auto-connect is enabled and we're not connected, try to connect to the first device
       if (config.autoConnect && !connectionState.connected && deviceList && deviceList.length > 0) {
         const deviceToConnect = deviceList[0];
-        logMessage(`Auto-connecting to device ${deviceToConnect.deviceId}`);
+        // Reduced logging spam - only log actual connection, not attempts
         connectDevice(deviceToConnect.deviceId);
       }
-      
+
       return deviceList || [];
     } catch (error) {
       logMessage(`Error getting device list: ${error}`);
@@ -363,15 +382,12 @@ export const useUsbSerial = (onLog?: (message: string) => void) => {
       const sub = port.onReceived((event: any) => {
         try {
           // Update the timestamp for last received data
-          console.log('Received data:', event.data);
           stateRefs.current.lastDataReceived = Date.now();
-          
+
           // The data is coming in as a hex string like "AAC01F00220057D870AB"
           const rawData = event.data;
-          
+
           if (rawData && typeof rawData === 'string' && rawData.length > 0) {
-            logMessage(`Received raw data: ${rawData}`);
-            
             // Convert the hex string to an array of bytes
             const byteArray: number[] = [];
             for (let i = 0; i < rawData.length; i += 2) {
@@ -380,24 +396,66 @@ export const useUsbSerial = (onLog?: (message: string) => void) => {
                 byteArray.push(byteValue);
               }
             }
-            
+
             if (byteArray.length === 10) {
-              logMessage(`Parsed complete 10-byte packet: ${ByteUtils.toHexString(byteArray)}`);
-            } else {
-              logMessage(`Parsed ${byteArray.length} bytes`);
+              // Parse the packet immediately to extract PM values
+              let pm25: number | null = null;
+              let pm10: number | null = null;
+              let packetType: 'standard' | 'modified' | null = null;
+
+              // Try standard format first (AA...AB markers)
+              if (byteArray[0] === 0xAA && byteArray[9] === 0xAB) {
+                const values = SensorPacket.extractValues(byteArray);
+                if (values) {
+                  pm25 = values.pm25;
+                  pm10 = values.pm10;
+                  packetType = 'standard';
+                }
+              }
+
+              // If standard format didn't work, try raw format
+              if (pm25 === null || pm10 === null) {
+                const rawPm25 = (byteArray[3] * 256 + byteArray[2]) / 10;
+                const rawPm10 = (byteArray[5] * 256 + byteArray[4]) / 10;
+
+                if (rawPm25 >= 0 && rawPm25 <= 999 && rawPm10 >= 0 && rawPm10 <= 999) {
+                  pm25 = rawPm25;
+                  pm10 = rawPm10;
+                  packetType = 'modified';
+                }
+              }
+
+              // Update state with parsed values (throttled to prevent overwhelming React)
+              if (pm25 !== null && pm10 !== null) {
+                const now = Date.now();
+                const timeSinceLastUpdate = now - lastStateUpdateTime.current;
+
+                // Only update state if enough time has passed (throttling)
+                if (timeSinceLastUpdate >= THROTTLE_MS) {
+                  setConnectionState(prev => ({
+                    ...prev,
+                    latestPM25: pm25,
+                    latestPM10: pm10,
+                    latestPacketType: packetType,
+                    latestTimestamp: now,
+                  }));
+
+                  lastStateUpdateTime.current = now;
+
+                  // Single consolidated log message for valid data (reduces logging overhead)
+                  logMessage(`Valid ${packetType} packet: PM2.5=${pm25.toFixed(1)}, PM10=${pm10.toFixed(1)}`);
+                }
+
+                // Reset error counter on successful data (even if we don't update state)
+                stateRefs.current.connectionErrorCount = 0;
+              }
             }
-            
-            // Update the data buffer with these bytes
-            setConnectionState(prev => ({
-              ...prev,
-              dataBuffer: byteArray // Just use the newly parsed bytes
-            }));
           }
         } catch (error) {
           logMessage(`Error parsing data: ${error}`);
           // Increment error counter on data errors
           stateRefs.current.connectionErrorCount++;
-          
+
           // If we've had multiple consecutive data errors, check connection
           if (stateRefs.current.connectionErrorCount >= 3) {
             checkConnectionStatus();
@@ -412,9 +470,10 @@ export const useUsbSerial = (onLog?: (message: string) => void) => {
         currentDevice: deviceId,
         subscription: sub,
       });
-      
-      logMessage(`Connected to device ${deviceId}`);
-      
+
+      // Track connection but don't spam logs - user will see data flowing
+      lastConnectedDeviceId.current = deviceId;
+
       // Refresh device list immediately after connection to update UI
       refreshDeviceList();
       
@@ -480,11 +539,10 @@ export const useUsbSerial = (onLog?: (message: string) => void) => {
           );
           
           if (deviceExists) {
-            logMessage(`Attempting to reconnect to previously detached device ${stateRefs.current.lastDetachedDeviceId}`);
+            // Reconnect silently - success will be logged by connectDevice
             connectDevice(stateRefs.current.lastDetachedDeviceId);
           } else if (deviceList.length > 0) {
             // If the device ID changed after reattachment, connect to first available
-            logMessage(`Previously detached device ID changed, connecting to first available device`);
             connectDevice(deviceList[0].deviceId);
           }
           // Reset the stored detached device ID
@@ -595,12 +653,6 @@ export const useUsbSerial = (onLog?: (message: string) => void) => {
     });
   }, [refreshDeviceList, logMessage]);
 
-  /**
-   * Clear the data buffer
-   */
-  const clearBuffer = useCallback(() => {
-    updateConnectionState({ dataBuffer: [] });
-  }, [updateConnectionState]);
 
   /**
    * Initialize USB Serial and set up permissions
@@ -663,7 +715,10 @@ export const useUsbSerial = (onLog?: (message: string) => void) => {
     devices,
     connected: connectionState.connected,
     currentDevice: connectionState.currentDevice,
-    dataBuffer: connectionState.dataBuffer,
+    latestPM25: connectionState.latestPM25,
+    latestPM10: connectionState.latestPM10,
+    latestPacketType: connectionState.latestPacketType,
+    latestTimestamp: connectionState.latestTimestamp,
     autoConnect: config.autoConnect,
     autoRefresh: config.autoRefresh,
     refreshDeviceList,
@@ -672,7 +727,6 @@ export const useUsbSerial = (onLog?: (message: string) => void) => {
     sendCommand,
     toggleAutoConnect,
     toggleAutoRefresh,
-    clearBuffer,
   };
 };
 
