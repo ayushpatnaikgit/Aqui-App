@@ -1,5 +1,14 @@
 /**
- * Utility functions for SDS011/SDS021 sensor data handling
+ * Utility functions for SDS011/SDS021 sensor data handling.
+ *
+ * Protocol summary (Nova Fitness "Laser Dust Sensor Control Protocol"):
+ *
+ *   Sensor -> host, 10 bytes:   AA C0 PM25lo PM25hi PM10lo PM10hi IDhi IDlo CS AB
+ *   Sensor -> host reply:       AA C5 cmd d1 d2 d3 IDhi IDlo CS AB
+ *     CS = sum(bytes 2..7) & 0xFF
+ *
+ *   Host -> sensor, 19 bytes:   AA B4 cmd d1 .. d12 IDhi IDlo CS AB
+ *     CS = sum(bytes 2..16) & 0xFF   (command, data and device id)
  */
 
 /**
@@ -9,151 +18,128 @@ export const ByteUtils = {
   padHex: (num: number): string => {
     return num.toString(16).padStart(2, '0');
   },
-  
+
   toHexString: (bytes: number[]): string => {
     return bytes.map(b => ByteUtils.padHex(b)).join(' ');
   },
-  
+
   toDecString: (bytes: number[]): string => {
     return bytes.map(byte => byte.toString().padStart(3, ' ')).join(' ');
   },
-  
+
   toHexStringCompact: (bytes: number[]): string => {
     return bytes.map(b => ByteUtils.padHex(b)).join('').toUpperCase();
-  }
+  },
+
+  /**
+   * Parse a compact hex string ("AAC0...") into bytes. Ignores whitespace and a
+   * trailing odd nibble; non-hex pairs are skipped.
+   */
+  fromHexString: (hex: string): number[] => {
+    const clean = hex.replace(/\s+/g, '');
+    const bytes: number[] = [];
+    for (let i = 0; i + 1 < clean.length; i += 2) {
+      const value = parseInt(clean.substring(i, i + 2), 16);
+      if (!Number.isNaN(value)) {
+        bytes.push(value);
+      }
+    }
+    return bytes;
+  },
 };
 
 /**
  * SDS011/SDS021 packet format handling
  */
 export const SensorPacket = {
+  FRAME_LENGTH: 10,
+  HEAD: 0xaa,
+  TAIL: 0xab,
+  TYPE_DATA: 0xc0,
+  TYPE_REPLY: 0xc5,
+
   /**
-   * Calculate checksum for SDS011/SDS021 packet
-   * Checksum is the sum of bytes 2-7 modulo 256
+   * Sum of bytes[from, to) modulo 256. Defaults cover a 10-byte response frame
+   * (bytes 2..7).
    */
-  calculateChecksum: (data: number[]): number => {
+  calculateChecksum: (data: number[], from: number = 2, to: number = 8): number => {
     let checksum = 0;
-    for (let i = 2; i < 8; i++) {
+    for (let i = from; i < to; i++) {
       checksum += data[i];
     }
-    return checksum & 0xFF;
+    return checksum & 0xff;
   },
-  
-  /**
-   * Convert modified 20-byte format to standard 10-byte format
-   */
-  convertModifiedFormat: (modifiedBuffer: number[]): number[] | null => {
-    // Check if buffer is the correct length
-    if (modifiedBuffer.length !== 20) {
-      return null;
-    }
 
-    // Check for expected start and end markers
-    const hasCorrectStartMarkers = modifiedBuffer[0] === 0x0A && modifiedBuffer[1] === 0x0A;
-    const hasCorrectEndMarkers = modifiedBuffer[18] === 0x0A && modifiedBuffer[19] === 0x0B;
-    
-    // Need either start or end markers to match
-    if (!hasCorrectStartMarkers && !hasCorrectEndMarkers) {
-      return null;
+  /**
+   * True for a complete, well-formed 10-byte frame (data or command reply)
+   * with a matching checksum.
+   */
+  isValidFrame: (frame: number[]): boolean => {
+    if (frame.length !== SensorPacket.FRAME_LENGTH) {
+      return false;
     }
+    if (frame[0] !== SensorPacket.HEAD || frame[9] !== SensorPacket.TAIL) {
+      return false;
+    }
+    if (frame[1] !== SensorPacket.TYPE_DATA && frame[1] !== SensorPacket.TYPE_REPLY) {
+      return false;
+    }
+    return SensorPacket.calculateChecksum(frame) === frame[8];
+  },
 
-    // Create standard buffer
-    const standardBuffer = [0xAA]; // Standard header
-    
-    // Extract data bytes
-    for (let i = 2; i < 18; i += 2) {
-      standardBuffer.push(modifiedBuffer[i]);
-    }
-    
-    standardBuffer.push(0xAB); // Standard tail
-    
-    return standardBuffer.length === 10 ? standardBuffer : null;
-  },
-  
   /**
-   * Extract PM2.5 and PM10 values from a modified format packet
+   * Extract PM2.5 and PM10 (µg/m³) from a valid data frame.
    */
-  extractFromModifiedFormat: (buffer: number[]): { pm25: number, pm10: number } | null => {
-    if (buffer.length !== 20) {
+  extractValues: (frame: number[]): { pm25: number; pm10: number } | null => {
+    if (!SensorPacket.isValidFrame(frame) || frame[1] !== SensorPacket.TYPE_DATA) {
       return null;
     }
-    
-    // Try different extraction methods
-    
-    // Method 1: Direct values
-    let pm25 = buffer[2];
-    let pm10 = buffer[4];
-    
-    if (pm25 >= 0 && pm25 <= 999 && pm10 >= 0 && pm10 <= 999) {
-      return { pm25, pm10 };
-    }
-    
-    // Method 2: Direct values divided by 10
-    pm25 = buffer[2] / 10;
-    pm10 = buffer[4] / 10;
-    
-    if (pm25 >= 0 && pm25 <= 99.9 && pm10 >= 0 && pm10 <= 99.9) {
-      return { pm25, pm10 };
-    }
-    
-    // Method 3: Try standard formula with bytes 2-5
-    const pm25Low = buffer[2];
-    const pm25High = buffer[3];
-    const pm10Low = buffer[4];
-    const pm10High = buffer[5];
-    
-    pm25 = ((pm25High * 256) + pm25Low) / 10;
-    pm10 = ((pm10High * 256) + pm10Low) / 10;
-    
-    if (pm25 >= 0 && pm25 < 1000 && pm10 >= 0 && pm10 < 1000) {
-      return { pm25, pm10 };
-    }
-    
-    return null;
-  },
-  
-  /**
-   * Extract PM2.5 and PM10 values from a valid packet (standard or modified format)
-   */
-  extractValues: (buffer: number[]): { pm25: number, pm10: number } | null => {
-    // Check for modified format (20 bytes, starts with 0A 0A)
-    if (buffer.length === 20 && buffer[0] === 0x0A && buffer[1] === 0x0A) {
-      const modifiedValues = SensorPacket.extractFromModifiedFormat(buffer);
-      if (modifiedValues) {
-        return modifiedValues;
-      }
-    }
-    
-    // Check for standard format (10 bytes, starts with AA, ends with AB)
-    if (buffer.length === 10 && buffer[0] === 0xAA && buffer[9] === 0xAB) {
-      // Extract bytes for PM2.5 and PM10
-      const pm25Low = buffer[2];
-      const pm25High = buffer[3];
-      const pm10Low = buffer[4];
-      const pm10High = buffer[5];
-      
-      // Calculate values using SDS011/SDS021 formula
-      const pm25 = ((pm25High * 256) + pm25Low) / 10;
-      const pm10 = ((pm10High * 256) + pm10Low) / 10;
-      
-      // Only return reasonable values
-      if (pm25 >= 0 && pm25 <= 1000 && pm10 >= 0 && pm10 <= 1000) {
-        return { pm25, pm10 };
-      }
-      
+    const pm25 = (frame[3] * 256 + frame[2]) / 10;
+    const pm10 = (frame[5] * 256 + frame[4]) / 10;
+    // The sensor's documented range is 0..999.9
+    if (pm25 > 1000 || pm10 > 1000) {
       return null;
     }
-    
-    // Try conversion from modified to standard as a last resort
-    if (buffer.length === 20) {
-      const converted = SensorPacket.convertModifiedFormat(buffer);
-      if (converted) {
-        return SensorPacket.extractValues(converted);
+    return { pm25, pm10 };
+  },
+
+  /**
+   * Device id (two bytes) from any valid frame, as a hex string like "5651".
+   */
+  deviceIdOf: (frame: number[]): string => {
+    return ByteUtils.padHex(frame[6]).toUpperCase() + ByteUtils.padHex(frame[7]).toUpperCase();
+  },
+
+  /**
+   * Pull every complete, valid frame out of a byte stream.
+   *
+   * USB serial delivers arbitrary chunks: a frame may arrive split across two
+   * reads, two frames may arrive in one read, and a read may start mid-frame.
+   * This scans for a valid frame at each candidate head byte, resynchronising
+   * on the next byte when the candidate fails validation, and returns the
+   * unconsumed tail so the caller can prepend it to the next chunk.
+   */
+  extractFrames: (buffer: number[]): { frames: number[][]; rest: number[] } => {
+    const frames: number[][] = [];
+    let i = 0;
+    while (i < buffer.length) {
+      if (buffer[i] !== SensorPacket.HEAD) {
+        i++;
+        continue;
+      }
+      if (buffer.length - i < SensorPacket.FRAME_LENGTH) {
+        break; // incomplete frame; wait for more bytes
+      }
+      const candidate = buffer.slice(i, i + SensorPacket.FRAME_LENGTH);
+      if (SensorPacket.isValidFrame(candidate)) {
+        frames.push(candidate);
+        i += SensorPacket.FRAME_LENGTH;
+      } else {
+        i++;
       }
     }
-    
-    return null;
-  }
+    return { frames, rest: buffer.slice(i) };
+  },
 };
 
 /**
@@ -163,52 +149,53 @@ export const SensorCommands = {
   WAKE: 'wake',
   SLEEP: 'sleep',
   READ: 'read',
-  
+  VERSION: 'version',
+  ACTIVE_MODE: 'active-mode',
+  CONTINUOUS: 'continuous',
+
+  COMMAND_LENGTH: 19,
+
   /**
-   * Generate command bytes for SDS011/SDS021 commands
+   * Build a 19-byte command frame addressed to all devices (id FF FF).
    */
   generate: (command: string): number[] => {
-    // Command structure: 
-    // byte 0: header (0xAA)
-    // byte 1: command byte (0xB4)
-    // byte 2: command type
-    // byte 3: command value
-    // bytes 4-15: zeros (0x00)
-    // bytes 16-17: device ID (0xFF 0xFF for all devices)
-    // byte 18: checksum
-    // byte 19: tail (0xAB)
-    
-    // Create command array
-    const cmdArray = [
-      0xAA, 0xB4, 0x00, 0x00, 
-      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-      0xFF, 0xFF, 0x00, 0xAB
-    ];
-    
-    // Set command type and value
+    // AA B4 cmd d1..d12 FF FF CS AB
+    const cmd = [0xaa, 0xb4, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0x00, 0xab];
+
     switch (command) {
       case SensorCommands.WAKE:
-        cmdArray[2] = 0x06; // Set sleep/work mode
-        cmdArray[3] = 0x01; // 1 = work mode
-        break;
-      case SensorCommands.READ:
-        cmdArray[2] = 0x04; // Request data
-        cmdArray[3] = 0x00; // 0 = no argument needed
+        cmd[2] = 0x06; // sleep/work
+        cmd[3] = 0x01; // write
+        cmd[4] = 0x01; // work
         break;
       case SensorCommands.SLEEP:
-        cmdArray[2] = 0x06; // Set sleep/work mode
-        cmdArray[3] = 0x00; // 0 = sleep mode
+        cmd[2] = 0x06; // sleep/work
+        cmd[3] = 0x01; // write
+        cmd[4] = 0x00; // sleep
+        break;
+      case SensorCommands.READ:
+        cmd[2] = 0x04; // query data (answered only in query reporting mode)
+        break;
+      case SensorCommands.VERSION:
+        cmd[2] = 0x07; // firmware version; read-only, replies AA C5 07 yy mm dd id id cs AB
+        break;
+      case SensorCommands.ACTIVE_MODE:
+        cmd[2] = 0x02; // reporting mode
+        cmd[3] = 0x01; // write
+        cmd[4] = 0x00; // active (report every second)
+        break;
+      case SensorCommands.CONTINUOUS:
+        cmd[2] = 0x08; // working period
+        cmd[3] = 0x01; // write
+        cmd[4] = 0x00; // 0 = continuous
         break;
       default:
-        cmdArray[2] = 0x06; // Default to wake
-        cmdArray[3] = 0x01;
+        throw new Error(`Unknown sensor command: ${command}`);
     }
-    
-    // Calculate checksum
-    cmdArray[18] = SensorPacket.calculateChecksum(cmdArray);
-    
-    return cmdArray;
-  }
+
+    cmd[17] = SensorPacket.calculateChecksum(cmd, 2, 17);
+    return cmd;
+  },
 };
 
 /**
@@ -219,34 +206,34 @@ export const AirQualityIndex = {
    * Get AQI category for PM2.5 value
    */
   getPM25Category: (value: number): string => {
-    if (value <= 12) return 'Good';
-    if (value <= 35) return 'Moderate';
-    if (value <= 55) return 'Unhealthy for Sensitive Groups';
-    if (value <= 150) return 'Unhealthy';
-    if (value <= 250) return 'Very Unhealthy';
+    if (value <= 12) {return 'Good';}
+    if (value <= 35) {return 'Moderate';}
+    if (value <= 55) {return 'Unhealthy for Sensitive Groups';}
+    if (value <= 150) {return 'Unhealthy';}
+    if (value <= 250) {return 'Very Unhealthy';}
     return 'Hazardous';
   },
-  
+
   /**
    * Get AQI category for PM10 value
    */
   getPM10Category: (value: number): string => {
-    if (value <= 54) return 'Good';
-    if (value <= 154) return 'Moderate';
-    if (value <= 254) return 'Unhealthy for Sensitive Groups';
-    if (value <= 354) return 'Unhealthy';
-    if (value <= 424) return 'Very Unhealthy';
+    if (value <= 54) {return 'Good';}
+    if (value <= 154) {return 'Moderate';}
+    if (value <= 254) {return 'Unhealthy for Sensitive Groups';}
+    if (value <= 354) {return 'Unhealthy';}
+    if (value <= 424) {return 'Very Unhealthy';}
     return 'Hazardous';
   },
-  
+
   /**
    * Get the style class name for a PM value based on its category
    */
   getCategoryStyle: (value: number, isPM25: boolean): string => {
-    const category = isPM25 
-      ? AirQualityIndex.getPM25Category(value) 
+    const category = isPM25
+      ? AirQualityIndex.getPM25Category(value)
       : AirQualityIndex.getPM10Category(value);
-    
+
     switch (category) {
       case 'Good': return 'goodReading';
       case 'Moderate': return 'moderateReading';
@@ -255,17 +242,16 @@ export const AirQualityIndex = {
       case 'Very Unhealthy': return 'veryUnhealthyReading';
       default: return 'hazardousReading';
     }
-  }
+  },
 };
 
 // For backward compatibility
 export const generateCommandBytes = SensorCommands.generate;
 export const calculateChecksum = SensorPacket.calculateChecksum;
 export const extractPMValues = SensorPacket.extractValues;
-export const extractPMValuesFromModifiedFormat = SensorPacket.extractFromModifiedFormat;
 export const byteArrayToHexString = ByteUtils.toHexString;
 export const byteArrayToDecString = ByteUtils.toDecString;
 export const padHex = ByteUtils.padHex;
 export const getPM25Category = AirQualityIndex.getPM25Category;
 export const getPM10Category = AirQualityIndex.getPM10Category;
-export const getPMCategoryStyle = AirQualityIndex.getCategoryStyle; 
+export const getPMCategoryStyle = AirQualityIndex.getCategoryStyle;

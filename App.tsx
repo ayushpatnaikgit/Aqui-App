@@ -103,6 +103,12 @@ function App(): React.JSX.Element {
     if (message.includes('Permission denied')) {
       return 'USB permission was denied';
     }
+    if (message.includes('Waiting for USB permission')) {
+      return 'Waiting for you to allow USB access';
+    }
+    if (message.includes('No data from sensor')) {
+      return 'Sensor connected but not sending data - reconnecting';
+    }
 
     // Data-related user messages
     if (message.includes('Valid values extracted') || message.includes('Parsed values from cleaned bytes')) {
