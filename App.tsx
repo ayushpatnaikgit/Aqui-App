@@ -215,7 +215,7 @@ function App(): React.JSX.Element {
       />
       <ScrollView contentInsetAdjustmentBehavior="automatic" style={styles.scrollView}>
         <View style={styles.header}>
-          <Text style={styles.headerText}>AQUI</Text>
+          <Text style={styles.headerText}>Aqui App</Text>
         </View>
 
         <View style={styles.container}>
