@@ -1,355 +1,196 @@
 /**
- * React Native App for SDS011/SDS021 PM Sensor Data
+ * Aqui: PM2.5 and PM10 from an SDS011/SDS021 sensor over USB.
+ *
+ * One screen at a time, all on the same paper: the live reading, "plug in the
+ * sensor", "allow USB access", and the log.
  */
 
-import React, { useState, useCallback, useEffect } from 'react';
-import {
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  useColorScheme,
-  View,
-  SafeAreaView,
-  Switch,
-} from 'react-native';
+import React, { useState, useCallback, useRef } from 'react';
+import { StatusBar, StyleSheet, View } from 'react-native';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Colors } from 'react-native/Libraries/NewAppScreen';
-import { SensorCommands } from './src/utils/sensorUtils';
+import TopBar, { SensorPresence } from './src/components/TopBar';
+import LiveReading from './src/components/LiveReading';
+import EmptyState, { LastReading } from './src/components/EmptyState';
+import LogsScreen, { LogEntry } from './src/components/LogsScreen';
+import { colors } from './src/theme';
 
-// Import components
-import DeviceList from './src/components/DeviceList';
-import SensorData from './src/components/SensorData';
-import LogView from './src/components/LogView';
-import RawDataMonitor from './src/components/RawDataMonitor';
-import AboutSensor from './src/components/AboutSensor';
-
-// Import hooks
 import useUsbSerial from './src/hooks/useUsbSerial';
 import useSensorData from './src/hooks/useSensorData';
 
-// Set to true for detailed developer logs, false for user-friendly logs
-const DEVELOPER_MODE = false;
+const MAX_LOG_ENTRIES = 200;
 
-function App(): React.JSX.Element {
-  const isDarkMode = useColorScheme() === 'dark';
-  const [log, setLog] = useState<string[]>([]);
-  const [devMode, setDevMode] = useState<boolean>(DEVELOPER_MODE);
-  const [showLogs, setShowLogs] = useState<boolean>(false);
+/**
+ * Plain-language wording for the hook's log lines. Returns null for lines
+ * that only matter in developer mode.
+ */
+const friendlyMessage = (message: string): string | null => {
+  if (message.startsWith('Found ')) {
+    return message === 'Found 0 device(s)' ? 'No sensor on the USB port' : 'Sensor found';
+  }
+  if (message.startsWith('Connected to device')) {
+    return 'Connected to sensor';
+  }
+  if (message.startsWith('Disconnected from device')) {
+    return 'Disconnected from sensor';
+  }
+  if (message.startsWith('USB device detached')) {
+    return 'Sensor unplugged';
+  }
+  if (message.startsWith('Waiting for USB permission')) {
+    return 'Waiting for you to allow USB access';
+  }
+  if (message.startsWith('Permission denied')) {
+    return 'USB access was denied';
+  }
+  if (message.startsWith('No data from sensor')) {
+    return 'Sensor connected but silent, reconnecting';
+  }
+  if (message.startsWith('Error connecting')) {
+    return 'Could not connect to the sensor';
+  }
+  if (message.startsWith('Error')) {
+    return 'A sensor error occurred';
+  }
+  return null;
+};
 
-  const backgroundStyle = {
-    backgroundColor: isDarkMode ? Colors.darker : Colors.lighter,
-    flex: 1,
-  };
+function Screen(): React.JSX.Element {
+  const insets = useSafeAreaInsets();
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [developer, setDeveloper] = useState(false);
+  const [showLogs, setShowLogs] = useState(false);
+  const nextId = useRef(1);
 
-  // Simplified helper to create user-friendly messages
-  const getUserFriendlyMessage = (message: string): string | null => {
-    // Connection-related user messages
-    if (message.includes('Found')) {
-      return 'Discovered sensor devices';
-    }
-    if (message.includes('Forcing immediate device list refresh')) {
-      return 'Updating device list';
-    }
-    if (message.includes('Connected to device')) {
-      return 'Connected to sensor successfully';
-    }
-    if (message.includes('Disconnected')) {
-      return 'Disconnected from sensor';
-    }
-    if (message.includes('USB device attached')) {
-      return 'USB device attached - preparing to connect';
-    }
-    if (message.includes('USB device detached')) {
-      return 'USB device physically removed';
-    }
-    if (message.includes('Remembered detached device')) {
-      return null; // Technical detail, hide in user mode
-    }
-    if (message.includes('Will refresh device list')) {
-      return null; // Technical detail, hide in user mode
-    }
-    if (message.includes('Attempting to reconnect to previously detached device')) {
-      return 'Attempting to reconnect to the previously connected device';
-    }
-    if (message.includes('Previously detached device ID changed')) {
-      return 'Reconnecting to available device';
-    }
-    if (message.includes('Handling physical device disconnection')) {
-      return 'USB device has been physically disconnected';
-    }
-    if (message.includes('waiting to stabilize')) {
-      return 'Device attached - waiting for connection to stabilize';
-    }
-    if (message.includes('Handling unexpected device disconnection')) {
-      return 'Sensor unexpectedly disconnected - will attempt to reconnect';
-    }
-    if (message.includes('Connection check failed')) {
-      return null; // Don't show these technical details in user mode
-    }
-    if (message.includes('Device appears to be disconnected')) {
-      return 'Lost connection to sensor - attempting to reconnect';
-    }
-    if (message.includes('Will try to reconnect')) {
-      return 'Attempting to reconnect to sensor...';
-    }
-    if (message.includes('Connection restored')) {
-      return 'Connection to sensor restored';
-    }
-    if (message.includes('Error connecting')) {
-      return 'Could not connect to sensor device';
-    }
-    if (message.includes('Permission denied')) {
-      return 'USB permission was denied';
-    }
-    if (message.includes('Waiting for USB permission')) {
-      return 'Waiting for you to allow USB access';
-    }
-    if (message.includes('No data from sensor')) {
-      return 'Sensor connected but not sending data - reconnecting';
-    }
+  const addLog = useCallback((raw: string) => {
+    const entry: LogEntry = {
+      id: nextId.current++,
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }),
+      raw,
+      friendly: friendlyMessage(raw),
+    };
+    setLogs(prev => [...prev, entry].slice(-MAX_LOG_ENTRIES));
+  }, []);
 
-    // Data-related user messages
-    if (message.includes('Valid values extracted') || message.includes('Parsed values from cleaned bytes')) {
-      // Extract the PM2.5 and PM10 values from the message
-      const pm25Match = message.match(/PM2\.5=(\d+\.?\d*)/);
-      const pm10Match = message.match(/PM10=(\d+\.?\d*)/);
-      const pm25Value = pm25Match ? pm25Match[1] : '?';
-      const pm10Value = pm10Match ? pm10Match[1] : '?';
-      
-      return `Air quality reading: PM2.5=${pm25Value}, PM10=${pm10Value} µg/m³`;
-    }
-    if (message.includes('Buffer cleared')) {
-      return null; // Don't show this to users
-    }
-    if (message.includes('No valid packets found')) {
-      return null; // Don't show this to users
-    }
-    if (message.includes('[DEBUG]')) {
-      return null; // Don't show debug messages to users
-    }
+  const { status, sensorId, latestPM25, latestPM10, latestPacketType, latestTimestamp, connectDevice, devices } =
+    useUsbSerial(addLog);
 
-    // Default fallback for unmatched messages
-    return message.includes('Error') ? 'A sensor error occurred' : null;
-  };
-
-  const addLog = useCallback((message: string) => {
-    setLog(prevLog => {
-      // In dev mode, show all logs, in user mode only show user-friendly ones
-      const userMessage = getUserFriendlyMessage(message);
-
-      if (!devMode && userMessage === null) {
-        return prevLog; // Skip this log in user mode if no user-friendly version
-      }
-
-      const displayMessage = devMode ? message : (userMessage || message);
-      const newLog = [...prevLog, `${new Date().toLocaleTimeString()}: ${displayMessage}`];
-
-      // Keep last 50 logs
-      return newLog.slice(-50);
-    });
-  }, [devMode]);
-
-  // Initialize USB Serial with logging
-  const {
-    devices,
-    connected,
-    currentDevice,
+  const { pm25, pm10, avgPm25, avgPm10, readingsCount, lastUpdate } = useSensorData({
     latestPM25,
     latestPM10,
     latestPacketType,
     latestTimestamp,
-    autoConnect,
-    autoRefresh,
-    refreshDeviceList,
-    connectDevice,
-    disconnectDevice,
-    sendCommand,
-    toggleAutoConnect,
-    toggleAutoRefresh,
-  } = useUsbSerial(addLog);
-
-  // Process sensor data
-  const { pm25, pm10, avgPm25, avgPm10, readingsCount, lastUpdate, packetType } = useSensorData({
-    latestPM25,
-    latestPM10,
-    latestPacketType,
-    latestTimestamp,
-    onLog: addLog,
   });
 
-  useEffect(() => {
-    console.log('[DEBUG] App: USB Connection status changed:', connected);
-  }, [connected]);
+  const presence: SensorPresence =
+    status === 'connected' ? 'connected' : status === 'waiting-permission' || status === 'connecting' ? 'found' : 'none';
+  const sensorLabel =
+    status === 'connected'
+      ? sensorId
+        ? `Sensor ${sensorId}`
+        : 'Connected'
+      : presence === 'found'
+      ? 'Sensor found'
+      : 'No sensor';
 
-  useEffect(() => {
-    if (pm25 !== null && pm10 !== null) {
-      console.log(`[DEBUG] App: New sensor readings - PM2.5: ${pm25}, PM10: ${pm10}, Type: ${packetType}`);
+  const askAgain = useCallback(() => {
+    if (devices.length > 0) {
+      connectDevice(devices[0].deviceId);
     }
-  }, [pm25, pm10, packetType]);
+  }, [connectDevice, devices]);
 
-  const clearLogs = () => {
-    console.log('[DEBUG] App: Clearing logs');
-    setLog([]);
-  };
-
-  const toggleDevMode = () => {
-    setDevMode(prev => !prev);
-    addLog(devMode ? 'Switching to user-friendly logs' : 'Developer mode enabled');
-  };
-
-  const toggleShowLogs = () => {
-    console.log('[DEBUG] Toggle show logs, current value:', showLogs);
-    setShowLogs(prev => {
-      console.log('[DEBUG] New value will be:', !prev);
-      return !prev;
-    });
-  };
+  let screen: React.ReactNode;
+  if (showLogs) {
+    screen = (
+      <LogsScreen entries={logs} developer={developer} onToggleDeveloper={setDeveloper} onClear={() => setLogs([])} />
+    );
+  } else if (status === 'connected' && pm25 !== null && pm10 !== null) {
+    screen = (
+      <LiveReading
+        pm25={pm25}
+        pm10={pm10}
+        avgPm25={avgPm25}
+        avgPm10={avgPm10}
+        readingsCount={readingsCount}
+        lastUpdate={lastUpdate}
+        onShowLogs={() => setShowLogs(true)}
+      />
+    );
+  } else if (status === 'connected' || status === 'connecting') {
+    screen = (
+      <EmptyState
+        icon="usb"
+        title="Listening"
+        body="The sensor is connected. The first reading arrives within a few seconds."
+        footerLeft={sensorLabel}
+        buttonLabel="Logs"
+        onButton={() => setShowLogs(true)}
+      />
+    );
+  } else if (status === 'waiting-permission') {
+    screen = (
+      <EmptyState
+        icon="lock"
+        title="Allow USB access"
+        body={
+          'Android is asking whether Aqui may use the sensor. Tap Allow, and tick "use by default" if you don\'t want to be asked each time it\'s plugged in.'
+        }
+        footerLeft="Waiting for permission"
+        buttonLabel="Ask again"
+        onButton={askAgain}
+      />
+    );
+  } else {
+    screen = (
+      <EmptyState
+        icon="usb"
+        title="Plug in the sensor"
+        body="Connect the SDS011 to the USB-C port. Aqui connects on its own and starts reading within a few seconds."
+        footerLeft={pm25 !== null && lastUpdate ? `Last reading ${lastUpdate}` : 'No readings yet'}
+        footerRight={pm25 !== null && pm10 !== null ? <LastReading pm25={pm25} pm10={pm10} /> : undefined}
+        buttonLabel="Logs"
+        onButton={() => setShowLogs(true)}
+      />
+    );
+  }
 
   return (
-    <SafeAreaView style={backgroundStyle}>
-      <StatusBar
-        barStyle={isDarkMode ? 'light-content' : 'dark-content'}
-        backgroundColor={backgroundStyle.backgroundColor}
-      />
-      <ScrollView contentInsetAdjustmentBehavior="automatic" style={styles.scrollView}>
-        <View style={styles.header}>
-          <Text style={styles.headerText}>Aqui App</Text>
-        </View>
+    <View style={[styles.page, { paddingTop: insets.top + 16, paddingBottom: Math.max(insets.bottom, 16) + 16 }]}>
+      <StatusBar barStyle="dark-content" backgroundColor={colors.paper} translucent={true} />
+      <View style={styles.content}>
+        <TopBar
+          title={showLogs ? 'Logs' : 'Aqui'}
+          presence={presence}
+          sensorLabel={sensorLabel}
+          onBack={showLogs ? () => setShowLogs(false) : undefined}
+        />
+        {screen}
+      </View>
+    </View>
+  );
+}
 
-        <View style={styles.container}>
-          {/* Sensor Data Display */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Sensor Data</Text>
-            <SensorData
-              pm25={pm25}
-              pm10={pm10}
-              avgPm25={avgPm25}
-              avgPm10={avgPm10}
-              readingsCount={readingsCount}
-              lastUpdate={lastUpdate}
-              connected={connected}
-              packetType={packetType}
-            />
-          </View>
-          {/* Device Connection Section */}
-          {/* <DeviceList
-            devices={devices}
-            connected={connected}
-            currentDevice={currentDevice}
-            autoConnect={autoConnect}
-            autoRefresh={autoRefresh}
-            onConnect={connectDevice}
-            onDisconnect={disconnectDevice}
-            onRefresh={refreshDeviceList}
-            onToggleAutoConnect={toggleAutoConnect}
-            onToggleAutoRefresh={toggleAutoRefresh}
-          /> */}
-
-          <AboutSensor />
-
-          {/* Raw Data Monitor - Note: This component needs updating to work with the new data flow
-          {connected && (
-            <RawDataMonitor dataBuffer={dataBuffer} connected={connected} />
-          )} */}
-
-          {/* Log Display Toggle Button */}
-          <TouchableOpacity 
-            style={styles.logToggleButton} 
-            onPress={toggleShowLogs}
-          >
-            <Text style={styles.logToggleButtonText}>
-              {showLogs ? 'Hide Logs' : 'Show Logs'}
-            </Text>
-          </TouchableOpacity>
-
-          {/* Log Display */}
-          {showLogs && (
-            <View style={styles.section}>
-              <View style={styles.devModeToggle}>
-                <Text style={styles.devModeText}>Developer Logs</Text>
-                <Switch
-                  trackColor={{ false: '#767577', true: '#81b0ff' }}
-                  thumbColor={devMode ? '#007AFF' : '#f4f3f4'}
-                  ios_backgroundColor="#3e3e3e"
-                  onValueChange={toggleDevMode}
-                  value={devMode}
-                />
-              </View>
-              <LogView 
-                logs={log} 
-                onClearLogs={clearLogs} 
-                connected={connected}
-              />
-            </View>
-          )}
-        </View>
-      </ScrollView>
-    </SafeAreaView>
+function App(): React.JSX.Element {
+  return (
+    <SafeAreaProvider style={styles.safe}>
+      <Screen />
+    </SafeAreaProvider>
   );
 }
 
 const styles = StyleSheet.create({
-  scrollView: {
+  safe: {
     flex: 1,
+    backgroundColor: colors.paper,
   },
-  container: {
-    padding: 16,
+  page: {
+    flex: 1,
+    backgroundColor: colors.paper,
+    paddingHorizontal: 28,
   },
-  header: {
-    padding: 16,
-    backgroundColor: '#007AFF',
-    marginTop: 30,
-  },
-  headerText: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: 'white',
-    textAlign: 'center',
-  },
-  section: {
-    marginBottom: 20,
-    backgroundColor: 'white',
-    borderRadius: 8,
-    padding: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    color: '#333',
-    fontWeight: 'bold',
-    marginBottom: 5,
-  },
-  devModeToggle: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 10,
-    paddingBottom: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-  },
-  devModeText: {
-    fontSize: 14,
-    color: '#666',
-    fontWeight: 'bold',
-  },
-  logToggleButton: {
-    backgroundColor: '#007AFF',
-    padding: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  logToggleButtonText: {
-    color: 'white',
-    fontWeight: 'bold',
-    fontSize: 16,
+  content: {
+    flex: 1,
+    gap: 20,
   },
 });
 

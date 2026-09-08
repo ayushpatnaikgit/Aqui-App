@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 
 /**
  * Custom hook for handling SDS011/SDS021 sensor data
@@ -8,7 +8,6 @@ interface UseSensorDataProps {
   latestPM10: number | null;
   latestPacketType: 'standard' | 'modified' | null;
   latestTimestamp: number | null;
-  onLog?: (message: string) => void;
 }
 
 interface ReadingData {
@@ -35,7 +34,6 @@ export const useSensorData = ({
   latestPM10,
   latestPacketType,
   latestTimestamp,
-  onLog
 }: UseSensorDataProps): SensorData => {
   const [sensorData, setSensorData] = useState<SensorData>({
     pm25: null,
@@ -47,7 +45,7 @@ export const useSensorData = ({
     packetType: null,
   });
 
-  const [readings, setReadings] = useState<ReadingData[]>([]);
+  const [, setReadings] = useState<ReadingData[]>([]);
 
   // Process new sensor readings whenever timestamp changes (indicating new data)
   useEffect(() => {
@@ -79,7 +77,7 @@ export const useSensorData = ({
         avgPm25: parseFloat(avgPm25Value.toFixed(1)),
         avgPm10: parseFloat(avgPm10Value.toFixed(1)),
         readingsCount: updatedReadings.length,
-        lastUpdate: new Date().toLocaleTimeString(),
+        lastUpdate: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }),
         packetType: latestPacketType,
       });
 

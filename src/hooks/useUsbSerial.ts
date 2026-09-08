@@ -85,6 +85,7 @@ export const useUsbSerial = (onLog?: (message: string) => void) => {
   const [status, setStatus] = useState<ConnectionStatus>('idle');
   const [currentDevice, setCurrentDevice] = useState<number | null>(null);
   const [latest, setLatest] = useState<Reading | null>(null);
+  const [sensorId, setSensorId] = useState<string | null>(null);
   const [config, setConfig] = useState({ autoConnect: true, autoRefresh: true });
 
   const session = useRef<Session>({
@@ -151,8 +152,10 @@ export const useUsbSerial = (onLog?: (message: string) => void) => {
           packetType: 'standard',
           timestamp: Date.now(),
         };
+        const id = SensorPacket.deviceIdOf(frame);
         if (!s.unmounted) {
           setLatest(reading);
+          setSensorId(prev => (prev === id ? prev : id));
         }
         log(`Reading: PM2.5=${values.pm25.toFixed(1)}, PM10=${values.pm10.toFixed(1)}`);
       }
@@ -492,6 +495,7 @@ export const useUsbSerial = (onLog?: (message: string) => void) => {
     status,
     connected: status === 'connected',
     currentDevice,
+    sensorId,
     latestPM25: latest ? latest.pm25 : null,
     latestPM10: latest ? latest.pm10 : null,
     latestPacketType: latest ? latest.packetType : null,
