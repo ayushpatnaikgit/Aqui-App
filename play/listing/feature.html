@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<!-- Source for feature-1024x500.png. Render: Chrome --headless --window-size=1024,500 --screenshot. -->
+<html><head><meta charset="utf-8"><style>
+@font-face { font-family: M; src: url("../../android/app/src/main/assets/fonts/Montserrat-ExtraBold.ttf"); font-weight: 800; }
+@font-face { font-family: M; src: url("../../android/app/src/main/assets/fonts/Montserrat-Bold.ttf"); font-weight: 700; }
+@font-face { font-family: S; src: url("../../android/app/src/main/assets/fonts/Merriweather-Regular.ttf"); }
+html, body { margin: 0; width: 1024px; height: 500px; overflow: hidden; background: #f2f1f0; }
+.wrap { position: relative; width: 1024px; height: 500px; box-sizing: border-box; padding: 0 72px; display: flex; align-items: center; gap: 64px; }
+.tile { width: 300px; height: 300px; flex: none; border: 4px solid #000; }
+.tile img { width: 100%; height: 100%; display: block; }
+.wm { width: 400px; height: 162px; color: #000; display: block; margin-bottom: 28px; }
+.line { font-family: M; font-weight: 800; font-size: 30px; line-height: 1.15; color: #000; letter-spacing: -0.01em; margin: 0 0 14px; }
+.sub { font-family: S; font-size: 19px; line-height: 1.5; color: #4b4b4b; margin: 0; }
+.bar { position: absolute; left: 0; right: 0; bottom: 0; height: 14px; background: #f57d6a; }
+</style></head><body>
+<div class="wrap">
+  <div class="tile"><img src="icon-512.png" alt=""></div>
+  <div>
+    <svg class="wm" viewBox="-19 -821 2522 1019">			<g transform="scale(1 -1)" fill="currentColor">
+				<path d="M-19 0 287 700H519L825 0H581L355 588H447L221 0ZM163 122 223 292H545L605 122Z" />
+				<path transform="translate(806 0)" d="M285 -10Q214 -10 153.5 24.0Q93 58 57.0 121.5Q21 185 21 273Q21 361 57.0 424.5Q93 488 153.5 522.5Q214 557 285 557Q361 557 406.5 527.0Q452 497 472.5 434.5Q493 372 493 273Q493 176 471.0 113.5Q449 51 403.0 20.5Q357 -10 285 -10ZM339 166Q364 166 384.0 178.0Q404 190 416.0 214.0Q428 238 428 273Q428 309 416.0 333.0Q404 357 384.0 369.0Q364 381 339 381Q314 381 294.0 369.0Q274 357 262.0 333.0Q250 309 250 273Q250 238 262.0 214.0Q274 190 294.0 178.0Q314 166 339 166ZM424 -194V73L434 273L435 473V547H650V-194Z" />
+				<path transform="translate(1506 0)" d="M278 -10Q213 -10 160.5 16.5Q108 43 78.0 99.5Q48 156 48 245V547H274V284Q274 226 293.0 203.0Q312 180 345 180Q365 180 382.5 190.5Q400 201 411.0 225.5Q422 250 422 290V547H648V0H433V158L476 115Q447 51 393.5 20.5Q340 -10 278 -10Z" />
+				<path transform="translate(2204 0)" d="M50 0V547H276V0ZM163 591Q101 591 64.0 624.0Q27 657 27 706Q27 755 64.0 788.0Q101 821 163 821Q225 821 262.0 790.0Q299 759 299 710Q299 658 262.0 624.5Q225 591 163 591Z" />
+				<!-- The descender is coral unless the surrounding element sets --wm-accent -->
+				<rect x="1226" y="-198" width="234" height="188" fill="#f57d6a" style="fill: var(--wm-accent, #f57d6a)" />
+			</g></svg>
+    <p class="line">PM2.5 and PM10, live<br>from a USB sensor.</p>
+    <p class="sub">Plug in an SDS011. No internet, no account,<br>no data collected.</p>
+  </div>
+</div>
+<div class="bar"></div>
+</body></html>

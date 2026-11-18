@@ -1,0 +1,1 @@
+First release on Google Play. Live PM2.5 and PM10 from an SDS011 sensor over USB, with no internet access and no data collected.

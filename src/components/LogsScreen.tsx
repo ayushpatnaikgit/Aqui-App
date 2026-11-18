@@ -1,7 +1,10 @@
 import React from 'react';
-import { View, Text, StyleSheet, FlatList, Pressable } from 'react-native';
+import { View, Text, StyleSheet, FlatList, Pressable, Linking } from 'react-native';
 import { colors, fonts } from '../theme';
 import Button from './Button';
+
+// Opens in the browser through an intent; the app itself has no internet permission.
+const PRIVACY_POLICY_URL = 'https://aqui.xkdr.org/privacy.html';
 
 export interface LogEntry {
   id: number;
@@ -51,6 +54,13 @@ const LogsScreen: React.FC<LogsScreenProps> = ({ entries, developer, onToggleDev
         )}
       />
       <Button label="Clear" variant="outline" onPress={onClear} />
+      <Pressable
+        style={styles.policy}
+        onPress={() => Linking.openURL(PRIVACY_POLICY_URL).catch(() => {})}
+        accessibilityRole="link"
+        accessibilityLabel="Privacy policy">
+        <Text style={styles.policyText}>Privacy policy</Text>
+      </Pressable>
     </View>
   );
 };
@@ -121,6 +131,17 @@ const styles = StyleSheet.create({
   rule: {
     height: 1,
     backgroundColor: colors.rule,
+  },
+  policy: {
+    minHeight: 44,
+    alignSelf: 'center',
+    justifyContent: 'center',
+  },
+  policyText: {
+    fontFamily: fonts.montserratSemiBold,
+    fontSize: 12,
+    color: colors.muted,
+    textDecorationLine: 'underline',
   },
   empty: {
     paddingVertical: 12,
