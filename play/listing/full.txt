@@ -1,0 +1,22 @@
+Aqui turns your Android phone into a particulate-matter monitor. Plug a Nova Fitness SDS011 (or SDS021) air quality sensor into the phone's USB port and Aqui shows live PM2.5 and PM10 readings, in µg/m³, a few seconds later.
+
+WHAT YOU SEE
+• PM2.5 in large type, with its air quality category (Good, Moderate, Sensitive groups and so on) and a one-line hint
+• PM10 alongside, with its own category
+• A rolling average of the last three readings and the time of the latest one
+• A log of what the app is doing: waiting for the sensor, asking for USB permission, connected, disconnected. A developer switch shows the raw sensor frames.
+
+WHAT YOU NEED
+• An SDS011 or SDS021 sensor with its USB serial adapter (CH340)
+• A USB-C or micro-USB OTG adapter, depending on your phone
+• An Android phone that supports USB host (OTG)
+The app only displays readings while a sensor is connected. The sensor, a short cable and a 3D-printable case cost a fraction of a commercial monitor. Parts list, case files and build videos are at aqui.xkdr.org.
+
+PRIVATE BY DESIGN
+• No internet permission: the app cannot send anything anywhere
+• No location, no account, no ads, no analytics
+• Readings stay in memory while the app is open and are not stored
+The only permission Aqui asks for is access to the USB sensor you plug in.
+
+OPEN SOURCE
+Aqui is open source. The code is at github.com/ayushpatnaikgit/Aqui-App.
